@@ -1,0 +1,516 @@
+rm(list=ls()) # clean up what is in memory
+
+
+library(dplyr)
+library(ggplot2)
+library(tokenizers)
+library(tidytext)
+library(SnowballC)
+library(ggrepel)
+library(dplyr)
+library(wordcloud)
+library(tidytext)
+library(ggrepel)
+library(smacof)
+library(ggfortify)
+library(quanteda)
+library(tm)
+library(anacor)
+library(wordcloud2)
+library(corpus)
+
+setwd("C:/Users/lichee/Documents/Block 4 Text Analytics")
+reviews_df<-(read.csv("1429_1.csv"))
+
+
+#Remove whitespaces
+reviews_df$name <- stripWhitespace(reviews_df$name)
+reviews_df <- reviews_df %>%
+  filter(name == "Fire Tablet, 7 Display, Wi-Fi, 8 GB - Includes Special Offers, Magenta") 
+reviews_df$Description <- as.character(reviews_df$reviews.text)
+
+
+##remove special characters
+removeSpecialChars <- function(x) gsub("[^a-zA-Z0-9 ]", " ", x) #Only keep characters within first brackets
+reviews_df$Description <- sapply(reviews_df$Description, removeSpecialChars)
+
+## rewrite abbrevations
+
+fix.contractions <- function(doc) {
+  # "won't" is a special case as it does not expand to "wo not"
+  doc <- gsub("won't", "will not", doc) #Use gsub to substitute
+  doc <- gsub("can't", "can not", doc)
+  doc <- gsub("n't", " not", doc)
+  doc <- gsub("'ll", " will", doc)
+  doc <- gsub("'re", " are", doc)
+  doc <- gsub("'ve", " have", doc)
+  doc <- gsub("'m", " am", doc)
+  doc <- gsub("'d", " would", doc)
+  # 's could be 'is' or could be possessive: it has no expansion
+  doc <- gsub("'s", "", doc)
+  return(doc)
+}
+
+# fix (expand) contractions
+reviews_df$Description <- sapply(reviews_df$Description, fix.contractions)
+
+##All characters to lowercase and remove numbers
+reviews_df$Description <- tolower(reviews_df$Description)
+reviews_df$Description <- removeNumbers(reviews_df$Description) # reviews_df: no numbers, all lowercase, but with stop words
+
+
+##get rid of all the stop words
+review_words <- reviews_df %>% unnest_tokens(word,Description,to_lower=FALSE) #cut text into words by splitting on spaces and punctuation
+
+data(stop_words)
+review_words <- review_words %>% anti_join(stop_words)
+
+#Remove undesirable words
+undesirable_words <- c("amazon", "tablet", "kindle", "product","tablets","fire")
+review_words <- review_words %>%
+  filter(!word %in% undesirable_words) #within the "word"-column in princefilt, remove all words in vector "undesirable_words"
+
+
+
+
+# frequency plot
+counts <- review_words %>% count(word, sort=TRUE)
+
+counts %>% 
+mutate(word = reorder(word,n)) %>% 
+top_n(20, word) %>%
+ggplot(aes(word,n)) +  
+geom_col() + 
+labs(x = NULL, y = "Number of occurences") + 
+coord_flip() + 
+theme(text = element_text(size = 17)) + 
+ggtitle("Word Frequency Histogram")
+
+#Create wordcloud for most occuring words 
+amazon_wordcloud <- review_words %>% count(word, sort = TRUE)
+wordcloud2(amazon_wordcloud[1:100, ], size = .5)
+
+write.csv(review_words,"cleanned_plain_words.csv")
+
+
+### Stemming 
+reviews_stemmed <- t(as.data.frame(text_tokens(review_words$word, stemmer = "en")))
+reviews_stemmed <- cbind(review_words, reviews_stemmed)
+colnames(reviews_stemmed)[23]<- "stemword"
+
+
+
+
+#Plot top 20 stemmed words 
+counts_stemmed <- reviews_stemmed %>% count(stemword, sort = TRUE) #Count words and sort 
+counts_stemmed20 <- counts_stemmed[(1:20),]
+ggplot(counts_stemmed20, aes(x = reorder(stemword, n), y = n)) +
+  geom_bar(stat="identity") +
+  coord_flip()
+
+
+#counting the counts
+#Count the number of times each count occurs
+#counted_counts <- counts  %>%count(n, sort=TRUE) # sort = TRUE for sorting in descending order of n. 
+
+### Top 20
+#counted_counts %>% 
+#mutate(n = reorder(n,nn)) %>% 
+#top_n(20, n) %>%
+#ggplot(aes(n,nn)) +  
+#geom_col() + 
+#labs(x = NULL, y = "Number of occurences") + 
+#coord_flip() + 
+#theme(text = element_text(size = 17)) + 
+#ggtitle("count Frequency Histogram")
+#
+### Bottom 20
+#counts %>% 
+#mutate(word = reorder(word,n)) %>% 
+#top_n(-20, word) %>%
+#ggplot(aes(word,n)) +  
+#geom_col() + 
+#labs(x = NULL, y = "Number of occurences") + 
+#coord_flip() + 
+#theme(text = element_text(size = 17)) + 
+#ggtitle("Word Frequency Histogram")
+#
+
+#
+##Remove frequent and infrequent words
+#
+#frequency <- reviews_df %>% unnest_tokens(word,Description) %>%count(word, sort=TRUE)
+#infrequent <- frequency %>% filter(n<0.01*nrow(reviews_df))
+#frequent <- frequency[1:2,] 
+#toremove  <- full_join(frequent,infrequent)
+#
+#j<-1 
+#for (j in 1:nrow(reviews_df)) {
+#tmp <-  anti_join((reviews_df[j,] %>% unnest_tokens(word,Description,to_lower=TRUE) ),toremove)
+#
+#reviews_df[j,"Description"]<-   paste((tmp[,"word"]),collapse = " ")
+#}
+#
+#frequency <- reviews_df %>% unnest_tokens(word,Description) %>%count(word, sort=TRUE)
+#
+#store the cleaned data for later use
+save(reviews_stemmed,file="amazon_stemmed.Rdata") 
+write.csv(reviews_stemmed,"amazon_stemmed.csv")
+
+
+
+# top words when recommend == True
+wordcount_happy <- reviews_stemmed %>% filter(reviews.doRecommend=="TRUE") %>%count(stemword, sort=TRUE)
+names(wordcount_happy)[2] <- "n_happy"
+
+png('histgram_happy.png')
+wordcount_happy %>% 
+mutate(word = reorder(stemword,n_happy)) %>% 
+top_n(20, word) %>%
+ggplot(aes(word,n_happy)) +  
+geom_col() + 
+labs(x = NULL, y = "Number of occurences") + 
+coord_flip() + 
+theme(text = element_text(size = 17)) + 
+ggtitle("Word Frequency Histogram Recommend")
+dev.off()
+
+# top words when recommend == False
+wordcount_unhappy <- reviews_stemmed %>% filter(reviews.doRecommend=="FALSE") %>%count(stemword, sort=TRUE)
+names(wordcount_unhappy)[2] <- "n_unhappy"
+
+png('histgram_unhappy.png')
+wordcount_unhappy %>% 
+mutate(word = reorder(stemword,n_unhappy)) %>% 
+top_n(20, word) %>%
+ggplot(aes(word,n_unhappy)) +  
+geom_col() + 
+labs(x = NULL, y = "Number of occurences") + 
+coord_flip() + 
+theme(text = element_text(size = 17)) + 
+ggtitle("Word Frequency Histogram Not Recommend")
+dev.off()
+
+### wordclouds ###
+
+#Create wordcloud for most occuring words 
+set.seed(12)
+
+wordcloud2(counts_stemmed[1:80, ], size = .5)
+
+
+# wordcloud when recommend== True
+wordcloud2(wordcount_happy[1:60, ], size = .5)
+
+# wordcloud when recommend == False
+wordcloud2(wordcount_unhappy[1:60, ], size = .5)
+
+
+
+
+
+
+#switching to document term matrix (this is the dfm (document frequency) format in quanteda )
+reviews_stemmed$stemword  <- as.character(reviews_stemmed$stemword)
+reviews_corpus <- corpus(reviews_stemmed, docid_field = "reviews.username", text_field = "stemword",  metacorpus = NULL, compress = TRUE) #compres=TRUE slows down, but might be needed to save memory space
+
+reviews_dfm <- dfm(reviews_corpus) # get document frequency matrix
+wordfreqs <- colSums(as.matrix(reviews_dfm)) #an alternative way of getting the total 
+wordfreqs <- data.frame(word = names(wordfreqs), n=wordfreqs)
+
+wordfreqs %>%
+mutate(word = reorder(word,n)) %>% 
+top_n(20, word) %>%
+ggplot(aes(word,n)) +  
+geom_col() + 
+labs(x = NULL, y = "Number of occurences") + 
+coord_flip() + 
+theme(text = element_text(size = 17)) + 
+ggtitle("Word Frequency Histogram ")
+
+
+docfreqs <- docfreq(reviews_dfm) %>% sort(decreasing = TRUE)
+docfreqs <- data.frame(word = names(docfreqs), n_docs=docfreqs)
+
+docfreqs %>%
+mutate(word = reorder(word,n_docs)) %>% 
+top_n(20, word) %>%
+ggplot(aes(word,n_docs)) +  
+geom_col() +  
+labs(x = NULL, y = "Number of occurences") + 
+coord_flip() + 
+theme(text = element_text(size = 17)) + 
+ggtitle("Document Frequency Histogram ")
+
+tf_idf_table <- merge(docfreqs, wordfreqs)
+
+tf_idf_table$tf_idf <- tf_idf_table$n/tf_idf_table$n_docs
+
+tf_idf_table<-tf_idf_table[order(-tf_idf_table$tf_idf),]
+
+
+## ???
+tf_idf_table %>%
+mutate(word = reorder(word,tf_idf)) %>% 
+top_n(20, tf_idf) %>%
+ggplot(aes(word,tf_idf)) +  
+geom_col() + 
+labs(x = NULL, y = "tf_idf") + 
+coord_flip() + 
+theme(text = element_text(size = 17)) + 
+ggtitle("TF-IDF value ")
+
+
+
+# Relatively most frequent words in recommend/not recommend
+both_un_happy <- merge(wordcount_unhappy, wordcount_happy)
+
+both_un_happy$ratio <- both_un_happy$n_happy / both_un_happy$n_unhappy
+
+both_un_happy<-both_un_happy[order(-both_un_happy$ratio),]
+
+
+both_un_happy %>%
+mutate(word = reorder(stemword,ratio)) %>% 
+top_n(20, ratio) %>%
+ggplot(aes(word,ratio)) +  
+geom_col() + 
+labs(x = NULL, y = "ratio") + 
+coord_flip() + 
+theme(text = element_text(size = 17)) + 
+ggtitle("Relatively most frequent words in happy ")
+
+
+
+both_un_happy %>%
+mutate(word = reorder(stemword,-ratio)) %>% 
+top_n(-20, ratio) %>%
+ggplot(aes(word,ratio)) +  
+geom_col() + 
+labs(x = NULL, y = "ratio") + 
+coord_flip() + 
+theme(text = element_text(size = 17)) + 
+ggtitle("Relatively most frequent words in unhappy ")
+
+
+review_tdm <- reviews_stemmed %>%count(stemword,reviews.doRecommend,sort=TRUE) %>%ungroup()%>%cast_tdm(stemword, reviews.doRecommend,n)
+
+#a comparison cloud focuses on the differences in frequencies across the two groups. Words that occur very often in both are not shown as prominently
+
+comparison.cloud(as.matrix(review_tdm), scale=c(5,0.3), random.order=FALSE, colors = c("indianred3","skyblue3"),title.size = 3,
+max.words=40, rot.per = 0.01) # if max.words=30, the could boarder is fine 
+
+
+reviews_dfm <- dfm(reviews_corpus) # get document frequency matrix
+counts <- colSums(as.matrix(reviews_dfm)) #an alternative way of getting the total 
+sortedcount <- counts%>% sort(decreasing=TRUE)
+sortednames <- names(sortedcount) #get the words sorted by their count
+
+nwords<-200
+subset_words<-as.matrix(reviews_dfm[,sortednames[1:nwords]])
+
+#take outerproduct of document frequency matrix counts word cooccurrence with itself very heavily
+#better to use Burt Table for presence of words
+#same is provided by fcm function in quanteda package (feature cooccurrence matrix)
+#benefit is that is allows counting within windows as well as in the full document
+
+Burt_outerproduct<-t(subset_words)%*%(subset_words) # product of word frequency
+Burt_outerproduct[1:10,1:10]
+
+Burt_outerproduct2<-t(subset_words>0)%*%(subset_words>0) # product of word presence
+Burt_outerproduct2[1:15,1:15]
+
+
+
+reviews_corp <- reviews_corpus # the professor defined the same thing twice, actually his reviews_corp = reviews_corpus
+
+Burt_fcm <- fcm(x = reviews_corp, context = "document", count = "boolean", tri=FALSE)
+
+Burt_fcm<-Burt_fcm[sortednames[1:nwords],sortednames[1:nwords]]
+
+#Need number of documents with each word on the diagonal
+reviews_dfm <- dfm(reviews_corpus) # get document frequency matrix
+counts <- colSums(as.matrix(reviews_dfm)>0) # count how often frequency is positive
+
+diag(Burt_fcm) <- counts[sortednames[1:nwords]]
+Burt_fcm[1:15,1:15]
+
+cc<- Burt_outerproduct2-Burt_fcm #check whether package provides the expected output
+print("are matrices the same?")
+(sum(abs(cc))==0)
+
+distances <- sim2diss(Burt_fcm, method = "cooccurrence") # Transform similarities to distances.
+distances[1:15,1:15]
+min(distances) #check whethet minimum distance is positive. Sometimes the counting procedure did something unexpected.
+max(distances) #check whethet minimum distance is positive. Sometimes the counting procedure did something unexpected.
+MDS_map <- smacofSym(distances) # run the routine that finds the best matching coordinates in a 2D mp given the distances
+ggplot(as.data.frame(MDS_map$conf), aes(D1, D2, label = rownames(MDS_map$conf))) +
+geom_text(check_overlap = TRUE) + theme_minimal(base_size = 15) + xlab('') + ylab('') +
+scale_y_continuous(breaks = NULL) + scale_x_continuous(breaks = NULL)
+# the conf element in the MDS output contains the coordinatis with as names D1 and D2.
+
+###Burt_fcm <- fcm(x = reviews_corp, context = "window", window=2, count = "boolean", tri=FALSE)
+###
+###Burt_fcm<-Burt_fcm[sortednames[1:nwords],sortednames[1:nwords]]
+###
+###diag(Burt_fcm) <- counts[sortednames[1:nwords]]
+###Burt_fcm[1:15,1:15]
+###distances <- sim2diss(Burt_fcm, method = "cooccurrence") # Transform similarities to distances.
+###min(distances) #check whethet minimum distance is positive. Sometimes the counting procedure did something unexpected.
+###max(distances) #check whethet minimum distance is positive. Sometimes the counting procedure did something unexpected.
+###MDS_map <- smacofSym(distances) # run the routine that finds the best matching coordinates in a 2D mp given the distances
+###ggplot(as.data.frame(MDS_map$conf), aes(D1, D2, label = rownames(MDS_map$conf))) +
+###geom_text(check_overlap = TRUE) + theme_minimal(base_size = 15) + xlab('') + ylab('') +
+###scale_y_continuous(breaks = NULL) + scale_x_continuous(breaks = NULL)
+# the conf element in the MDS output contains the coordinatis with as names D1 and D2.
+
+
+Burt_fcm <- fcm(x = reviews_corp, context = "window", window=4, count = "boolean", tri=FALSE)
+
+Burt_fcm<-Burt_fcm[sortednames[1:nwords],sortednames[1:nwords]]
+
+diag(Burt_fcm) <- counts[sortednames[1:nwords]]
+Burt_fcm[1:15,1:15]
+distances <- sim2diss(Burt_fcm, method = "cooccurrence") # Transform similarities to distances.
+min(distances) #check whethet minimum distance is positive. Sometimes the counting procedure did something unexpected.
+max(distances) #check whethet minimum distance is positive. Sometimes the counting procedure did something unexpected.
+MDS_map <- smacofSym(distances) # run the routine that finds the best matching coordinates in a 2D mp given the distances
+ggplot(as.data.frame(MDS_map$conf), aes(D1, D2, label = rownames(MDS_map$conf))) +
+geom_text(check_overlap = TRUE) + theme_minimal(base_size = 15) + xlab('') + ylab('') +
+scale_y_continuous(breaks = NULL) + scale_x_continuous(breaks = NULL)
+# the conf element in the MDS output contains the coordinatis with as names D1 and D2.
+
+
+# get document term matrix (dtm)
+reviews_stemmed$reviews.username <- as.numeric(reviews_stemmed$reviews.username) # make pca be applicable
+review_dtm_sparse <- reviews_stemmed  %>%count(reviews.username,stemword,sort=TRUE)%>%ungroup()%>%cast_sparse(reviews.username,stemword,n)
+
+pca_results <- prcomp(review_dtm_sparse, scale = FALSE, rank. = 50) # waarom zetten we scale op FALSE en niet op TRUE? pca_results_backup <- pca_results
+
+
+
+ncomp<-10
+rawLoadings <- pca_results$rotation[,1:ncomp] %*% diag(pca_results$sdev, ncomp, ncomp)
+rotated <- varimax(rawLoadings)
+pca_results$rotation <- rotated$loadings
+pca_results$x <- scale(pca_results$x[1:100,1:ncomp]) %*% rotated$rotmat
+
+
+print("PCA finished")
+
+## select the most important words per rotated dimension
+
+j<-1
+toplist <- abs(pca_results$rotation[,j]) %>% sort(decreasing=TRUE) %>% head(10)
+topwords <- t(names(toplist))
+for (j in 2:4){
+toplist <--abs(pca_results$rotation[,j]) %>% sort(decreasing=TRUE) %>% head(10)
+topwords <-cbind( t(names(toplist)),topwords)
+}
+
+# permutation test for PCA #
+source("permtestPCA.R") # Load the permtestPCA() function
+perm_range <- permtestPCA(review_dtm_sparse)
+
+## bootstrap #
+#if (!require("boot")) install.packages("boot")
+#library(boot)
+## Goal: bootstrap the eigenvalues
+## 1. Define function that runs PCA and returns
+#my_boot_pca <- function(x, ind)f
+#res <- princomp(x[ind, ], cor = TRUE)
+#return(pca_results$sdev^2)
+## 2. Run bootstrap
+#res.boot <- boot(data = review_stemmed, statistic = my_boot_pca, R = 1000)
+## 3. Store the bootstrapped statistic (here all eigenvalues)
+#eigs.boot <- res.boot$t # Store the R x p matrix with eigenvalues
+
+
+
+pca_results_backup <- pca_results
+pca_results_small <- pca_results
+
+pca_results_small$rotation<-pca_results_small$rotation[unique(t(topwords)),]
+
+pca_results_small$x <- pca_results_small$x[1:100,1:10] # individuals and factors
+#pca_results_small$rotation <- pca_results_small$rotation[1:10,1:10] # individuals and factors
+pca_results_small$center <- pca_results_small$center[1:10] # individuals and factors
+
+
+pca_results <- pca_results_small
+
+library(factoextra)
+fviz_screeplot(pca_results,ncp=30)
+
+axeslist=c(1,4)
+
+fviz_pca_ind(pca_results, axes = axeslist,
+col.ind = "cos2", # Color by the quality of representation
+gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+repel = FALSE,     # Avoid text overlapping
+geom = "point" # shows only points and no lables
+)
+# biplot
+fviz_pca_biplot(pca_results, repel = TRUE,axes=axeslist,
+                col.var = "#2E9FDF", # Variables color
+                col.ind = "#696969"  # Individuals color
+                ,               geom = "point" # shows only points and no lables
+)
+
+
+
+
+axeslist <- c(1,3)
+fviz_pca_var(pca_results, axes=axeslist,
+col.var = "contrib", # Color by contributions to the PC
+gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+repel = TRUE     # Avoid text overlapping
+)
+# biplot
+fviz_pca_biplot(pca_results, repel = TRUE,axes=axeslist,
+                col.var = "#2E9FDF", # Variables color
+                col.ind = "#696969"  # Individuals color
+                ,               geom = "point" # shows only points and no lables
+)
+
+
+axeslist <- c(1,2)
+fviz_pca_var(pca_results, axes=axeslist,
+             col.var = "contrib", # Color by contributions to the PC
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE,     # Avoid text overlapping
+             title = "PCA on Dimension 1 and 2"
+)
+# biplot
+fviz_pca_biplot(pca_results, repel = TRUE,axes=axeslist,
+                col.var = "#2E9FDF", # Variables color
+                col.ind = "#696969"  # Individuals color
+                ,               geom = "point",
+                title = "PCA on Dimension 1 and 2"# shows only points and no lables
+)
+
+
+axeslist <- c(2,3)
+fviz_pca_var(pca_results, axes=axeslist,
+             col.var = "contrib", # Color by contributions to the PC
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE,     # Avoid text overlapping
+             title = "PCA on Dimension 2 and 3"
+)
+
+
+
+
+#plot individuals by score/evaluation???
+groups <- as.factor(counts_stemmed[1:100, 'review.doRecommend' ])
+fviz_pca_ind(pca_results, axes=c(1,2),
+col.ind = groups, # color by groups
+palette = c("#00AFBB",  "#FC4E07"),
+addEllipses = TRUE, # Concentration ellipses
+ellipse.type = "confidence",
+legend.title = "Groups",
+repel = TRUE
+,               geom = "point" # shows only points and no lables
+)
+
+aaa$sumsgax <- sum(aaa$sentiment, aaa$flipped)

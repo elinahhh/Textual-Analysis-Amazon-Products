@@ -385,8 +385,7 @@ scale_y_continuous(breaks = NULL) + scale_x_continuous(breaks = NULL)
 reviews_stemmed$reviews.username <- as.numeric(reviews_stemmed$reviews.username) # make pca be applicable
 review_dtm_sparse <- reviews_stemmed  %>%count(reviews.username,stemword,sort=TRUE)%>%ungroup()%>%cast_sparse(reviews.username,stemword,n)
 
-pca_results <- prcomp(review_dtm_sparse, scale = FALSE, rank. = 50) # waarom zetten we scale op FALSE en niet op TRUE? pca_results_backup <- pca_results
-
+pca_results <- prcomp(review_dtm_sparse, scale = FALSE, rank. = 50) 
 
 
 ncomp<-10
